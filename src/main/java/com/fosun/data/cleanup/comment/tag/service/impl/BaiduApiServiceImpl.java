@@ -466,17 +466,9 @@ public class BaiduApiServiceImpl {
         List<String> tags = new ArrayList<>();
         long t1=System.currentTimeMillis();
 //        Pattern emoji = Pattern.compile ("[\ud83c\udc00-\ud83c\udfff]|[\ud83d\udc00-\ud83d\udfff]|[\u2600-\u27ff]",Pattern.UNICODE_CASE | Pattern.CASE_INSENSITIVE ) ;
-        content = content.replaceAll(rm_pattern,"");
-        HttpHeaders headers = new HttpHeaders();
-        headers.add("content-type","application/x-www-form-urlencoded");
-        MultiValueMap<String, String> requestEntity = new LinkedMultiValueMap<>();
-        requestEntity.add("s",content);
-        requestEntity.add("f","json");
-        HttpEntity<MultiValueMap<String, String>> httpEntity = new HttpEntity<>(requestEntity,headers);
-        ResponseEntity<JSONArray> response = restTemplate.postForEntity( isMall? URL_MALL:URL_SHOP ,httpEntity, JSONArray.class);
+        JSONArray arr = requestLTPServer(content,isMall);
        log.info(String.format("request cost %f s",(System.currentTimeMillis()-t1)*1.0/1000));
-        if(response.getStatusCode().equals(HttpStatus.OK) && !CollectionUtils.isEmpty(response.getBody())){
-            JSONArray arr = response.getBody().getJSONArray(0);
+        if(!CollectionUtils.isEmpty(arr)){
             //一个段落里的每句话，按照句号、问好、感叹号等分隔
             arr.parallelStream().forEach(x->{
                 JSONArray subSentenceArr = (JSONArray) x;
@@ -518,6 +510,39 @@ public class BaiduApiServiceImpl {
         long t2 = System.currentTimeMillis();
         log.info("评论id:{}解析成功, cost:{} ",id, (t2 - t1)*0.1/1000 + " s");
         return new Tuple<>(tags,content);
+    }
+
+    /**
+     *
+     * 防止一句话太长导致服务奔溃。所以，需要拆开来处理
+     * @param content 拆分后的句子
+     * @param isMall 是否是商场
+     * @return 句子解析的结果
+     */
+    private JSONArray requestLTPServer(String content,boolean isMall){
+        content = content.replaceAll(rm_pattern,"");
+
+        JSONArray arr = new JSONArray();
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("content-type","application/x-www-form-urlencoded");
+        if(StringUtils.isNotBlank(content)){
+            MultiValueMap<String, String> requestEntity;
+            String[] contents = content.split("[。！？]");
+            for(String text : contents){
+                if(StringUtils.isNotBlank(text)){
+                    requestEntity = new LinkedMultiValueMap<>();
+                    requestEntity.add("f","json");
+                    requestEntity.add("s",text);
+                    HttpEntity<MultiValueMap<String, String>> httpEntity = new HttpEntity<>(requestEntity,headers);
+                    ResponseEntity<JSONArray> response = restTemplate.postForEntity( isMall? URL_MALL:URL_SHOP ,httpEntity, JSONArray.class);
+                    if(response.getStatusCode().equals(HttpStatus.OK) && !CollectionUtils.isEmpty(response.getBody())
+                            && !CollectionUtils.isEmpty(response.getBody().getJSONArray(0))) {
+                        arr.add(response.getBody().getJSONArray(0).getJSONArray(0));
+                    }
+                }
+            }
+        }
+        return arr;
     }
 
     /**
