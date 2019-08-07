@@ -1,0 +1,123 @@
+#服务应用相关配置
+server:
+  #应用端口号
+  port: 9006
+  servlet:
+    #应用path路径
+    context-path: /
+
+#日志格式
+logging:
+  config: classpath:logback-boot.xml
+  level:
+    com:
+      fosun:
+        blm:
+          joycity: debug
+
+#Spring 框架相关配置
+spring:
+  application:
+    # 应用名称
+    name: joycity-blm-serv-comment-tag
+  http:
+    encoding:
+      charset: UTF-8
+      enabled: true
+  # 数据源配置
+  datasource:
+      url: jdbc:mysql://172.16.17.115:3306/blm_serv?useUnicode=true&characterEncoding=utf-8&useSSL=false&useTimezone=true&serverTimezone=GMT%2B8
+      #  &allowPublicKeyRetrieval=true
+      username: blm_serv_user
+      password: blm_serv_pwd
+      initial-size: 10
+      max-active: 10
+      min-idle: 5
+      max-wait: 5
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 10
+      max-open-prepared-statements: 10
+      validation-query: select * from dual
+      #validation-query-timeout:4000
+      test-on-borrow: true
+      test-on-return: true
+      test-while-idle: false
+      query-timeout: 100000
+      transaction-query-timeout: 100000
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      type: com.alibaba.druid.pool.DruidDataSource
+
+
+  #redis配置
+  redis:
+    database: 7
+#    host: 172.17.18.70
+    port: 6379
+    password: fonova123
+#开发
+    host: 172.16.17.120
+
+     # 连接池最大连接数（使用负值表示没有限制） 默认 8
+
+    lettuce:
+      pool:
+        max-active: 8
+        # 连接池最大阻塞等待时间（使用负值表示没有限制） 默认 -1
+        max-wait: -1ms
+        # 连接池中的最大空闲连接 默认 8
+        max-idle: 8
+        # 连接池中的最小空闲连接 默认 0
+        min-idle: 1
+
+
+
+  #spring data 相关配置
+  data:
+    #关闭spring data redis 仓库的扫描
+    redis:
+      repositories:
+        enabled: false
+
+    mongodb:
+      host: 172.17.18.70
+      port: 27017
+      username: blm_serv
+      password: blm_serv
+      database: blm_serv
+#      开发
+#      host: 172.16.17.121
+#      port: 27000
+
+
+
+  #JPA 相关配置
+  jpa:
+    #打印执行SQL
+    show-sql: true
+
+
+#应用自定义配置
+core:
+  #环境变量
+  env: dev
+
+
+# 百度api 接口调用配置
+baidu_api:
+  sleep: 500
+  appid: 16832882
+  key: sFvE4PQ1O4IhWp0QwD9yoHt8
+  secret: IFoLvAT6zmE3dut6CA5Yb3slZDElSgyS
+
+
+
+# 本地api接口的相关配置参数
+URL_SHOP: http://121.199.68.250:10086/ltp
+URL_MALL: http://121.199.68.250:10087/ltp
+HTTP_CLIENT_RETRY_COUNT : 3
+MAXIMUM_TOTAL_CONNECTION : 10
+MAXIMUM_CONNECTION_PER_ROUTE : 5
+CONNECTION_VALIDATE_AFTER_INACTIVITY_MS : 20000
+CONNECT_TIMEOUT: 6000
+READ_TIMEOUT: 60000
+CONNECT_REQUSET_TIMEOUT: 60000
