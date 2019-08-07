@@ -1,0 +1,3 @@
+ curl -d "s=他点头表示同意我的意见。&f=xml&t=all" http://127.0.0.1:8080/ltp
+ 
+ nohup  ./ltp_server  --port 10086 --threads 5 --segmentor-model ../model/cws.model --postagger-model ../model/pos.model --ner-model ../model/ner.model --srl-model ../model/pisrl.model  --parser-model ../model/parser.model --log-level 2 &
