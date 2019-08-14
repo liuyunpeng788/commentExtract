@@ -26,7 +26,7 @@ spring:
       enabled: true
   # 数据源配置
   datasource:
-      url: jdbc:mysql://127.0.0.1:3306/blm_serv?useUnicode=true&characterEncoding=utf-8&useSSL=false&useTimezone=true&serverTimezone=GMT%2B8
+      url: jdbc:mysql://172.16.17.115:3306/blm_serv?useUnicode=true&characterEncoding=utf-8&useSSL=false&useTimezone=true&serverTimezone=GMT%2B8
       #  &allowPublicKeyRetrieval=true
       username: blm_serv_user
       password: blm_serv_pwd
@@ -51,7 +51,7 @@ spring:
   #redis配置
   redis:
     database: 7
-    host: 127.0.0.1
+    host: 172.17.18.70
     port: 6379
     password: fonova123
 #开发
@@ -79,13 +79,13 @@ spring:
         enabled: false
 
     mongodb:
-      host: 127.0.0.1
+      host: 172.17.18.70
       port: 27017
       username: blm_serv
       password: blm_serv
       database: blm_serv
 #      开发
-#      host: 127.0.0.1
+#      host: 172.16.17.121
 #      port: 27000
 
 
@@ -124,5 +124,7 @@ CONNECT_REQUSET_TIMEOUT: 60000
 
 
 #告警设置相关
+#是否开启告警
+open_alert=true
 alert_threshold = 10
 alert_url = https://oapi:dingtalk:com/robot/send?access_token=c966629e8c9c9cb42b3bf0017b4398296969fb6ec2d680b1101ff2337756c54f:

@@ -11,12 +11,12 @@ import com.fosun.data.cleanup.comment.tag.dto.po.mongodb.MallCommentInfoPo;
 import com.fosun.data.cleanup.comment.tag.dto.po.mongodb.MongoCommentTagInfoPo;
 import com.fosun.data.cleanup.comment.tag.dto.po.mongodb.ShopCommentInfoPo;
 import com.fosun.data.cleanup.comment.tag.enums.SubjectTypeEnum;
-import com.fosun.data.cleanup.comment.tag.redis.RedisUtil;
 import com.fosun.data.cleanup.comment.tag.repository.CommentTagPoRepository;
 import com.fosun.data.cleanup.comment.tag.repository.ShopClassRepository;
 import com.fosun.data.cleanup.comment.tag.repository.ShopInfoRepository;
 import com.fosun.data.cleanup.comment.tag.tuple.Tuple;
 import com.fosun.data.cleanup.comment.tag.utils.DateUtil;
+import com.fosun.data.cleanup.comment.tag.utils.HttpUtil;
 import com.mongodb.client.result.UpdateResult;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -39,7 +39,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -95,8 +94,7 @@ public class BaiduApiServiceImpl {
     private ShopInfoRepository shopInfoRepository;
     @Autowired
     private ShopClassRepository shopClassRepository ;
-    @Autowired
-    private RedisUtil redisUtil;
+
     @Autowired
     private RestTemplate restTemplate;
     @Value("${URL_MALL}")
@@ -104,8 +102,9 @@ public class BaiduApiServiceImpl {
 
     @Value("${URL_SHOP}")
     private String URL_SHOP;
+
     @Autowired
-    private DingDingAlertServiceImpl alertService;
+    private HttpUtil httpUtil;
 
 
     /**
@@ -235,7 +234,6 @@ public class BaiduApiServiceImpl {
         }catch (Exception e){
             log.error("写入mongodb标签失败，异常信息:" + e.getLocalizedMessage());
         }finally {
-
             long end = System.currentTimeMillis();
             log.info("写入mongodb 标签结束,一共写入{}条标签,耗时：{}s",cnt,1.0*(end-start)/1000);
         }
@@ -600,22 +598,9 @@ public class BaiduApiServiceImpl {
                 requestEntity.add("text",content);
                 requestEntity.add("type",eSimnetType.ordinal());
                 HttpEntity<MultiValueMap<String, Object>> httpEntity = new HttpEntity<>(requestEntity,headers);
-                ResponseEntity<JSONObject> response ;
-                for(int i = 0;i<3;i++){
-                    try {
-                        response = restTemplate.postForEntity( url ,httpEntity, JSONObject.class);
-                        Thread.sleep(sleep);
-                        if(response.getStatusCode().equals(HttpStatus.OK)){
-                            log.info("调用百度api请求成功。res: " + response.toString());
-                            return response.getBody();
-                        }
-                    } catch (Exception e) {
-                        log.error("调用api请求发生异常....，异常信息：" + e.getMessage());
-                    }
-                }
+                return httpUtil.sendReq(url,httpEntity);
             }
         }
-
         return new JSONObject();
     }
 
@@ -688,13 +673,10 @@ public class BaiduApiServiceImpl {
         res = getAPIData(content,eSimnetType);
         List<String> tags = new ArrayList<>();
         if(null == res.get("items")){
-            //发送钉钉告警
-            alertService.checkAndSendAlert(false);
             log.warn("评论id:{}百度api调用失败",id);
             failureCount.getAndIncrement();
             return new Tuple(new ArrayList<>(0),content);
         }
-        alertService.checkAndSendAlert(true);
         log.info("调用百度api成功");
         JSONArray arr = res.getJSONArray("items");
         JSONObject obj;
@@ -719,7 +701,6 @@ public class BaiduApiServiceImpl {
                 while (matcher.find()) {
                     String matchWord = matcher.group(1);
                     if (StringUtils.isNotBlank(matchWord)) {
-
                         if (matchWord.contains("[+.?*]")) {
                             matchWord = matchWord.replaceAll("[?]", ",");
                             content = content.replaceAll("[?]", ",").replaceAll("[.]", ",")
@@ -804,6 +785,7 @@ public class BaiduApiServiceImpl {
      */
     public int runMakeupData(Integer type, String strStartDate, String strEndDate) {
         int num = 0;
+        long startTimeStamp = System.currentTimeMillis();
         try{
             Date start = DateUtil.asDate(LocalDate.parse(strStartDate,DateUtil.dateFormatter));
             Date end = DateUtil.asDate(LocalDate.parse(strEndDate,DateUtil.dateFormatter));
@@ -821,7 +803,8 @@ public class BaiduApiServiceImpl {
           }catch(Exception e){
             log.error("处理历史数据出错,错误信息：{}" ,e.getMessage());
         }
+        long endTimeStamp = System.currentTimeMillis();
+        log.info("处理历史数据成功。共处理数据{}条,耗时：{}s",num,(endTimeStamp - startTimeStamp)*1.0/1000);
         return num;
-
     }
 }

@@ -14,4 +14,5 @@ public class Const {
      public static final String BAIDU_AI_APP_ID = "16832882";
      public static final String BAIDU_AI_API_KEY = "sFvE4PQ1O4IhWp0QwD9yoHt8";
      public static final String BAIDU_AI_SECRET_KEY = "IFoLvAT6zmE3dut6CA5Yb3slZDElSgyS";
+     public static final String API_ALERT_KEY = "JOYCITY:APP:ALERT:ERR_COUNT";
 }

@@ -60,6 +60,11 @@ public class KeywordTaskService implements Runnable {
      */
     private String strEndDate;
 
+    /**
+     * 设置key的过期时间。基本上永不过期
+     */
+    private static final long REDIS_KEY_TIMEOUT = 10*360;
+
 
 
     /**
@@ -107,10 +112,10 @@ public class KeywordTaskService implements Runnable {
          * 出现次数
          */
         if(!redisTemplate.hasKey(PRE_EMPTY_TIMES)){
-            redisTemplate.opsForValue().set(PRE_EMPTY_TIMES ,"0",10,TimeUnit.DAYS);
+            redisTemplate.opsForValue().set(PRE_EMPTY_TIMES ,"0",REDIS_KEY_TIMEOUT,TimeUnit.DAYS);
         }
         Integer times = Integer.valueOf((String)redisTemplate.opsForValue().get(PRE_EMPTY_TIMES));
-         //每次处理前十天的数据
+         //每次处理前5天的数据
         LocalDateTime localDateTime = LocalDateTime.now();
         if(redisTemplate.hasKey(PRE_DATE_KEY)){
             end = DateUtil.asDate(LocalDate.parse((String)redisTemplate.opsForValue().get(PRE_DATE_KEY),DateUtil.dateFormatter)) ;
@@ -132,7 +137,7 @@ public class KeywordTaskService implements Runnable {
                 if(records == 0){
                    times =Integer.valueOf((String) redisTemplate.opsForValue().get(PRE_EMPTY_TIMES ));
                    if( times < Integer.MAX_VALUE){
-                       redisTemplate.opsForValue().set(PRE_DATE_KEY  ,String.valueOf(times + 1),10,TimeUnit.DAYS);
+                       redisTemplate.opsForValue().set(PRE_DATE_KEY  ,String.valueOf(times + 1),REDIS_KEY_TIMEOUT,TimeUnit.DAYS);
                    }
                }
             } catch (Exception e) {
@@ -140,7 +145,7 @@ public class KeywordTaskService implements Runnable {
             }
             end = start;
             localDateTime = LocalDateTime.now();
-            redisTemplate.opsForValue().set(PRE_DATE_KEY  ,DateUtil.asLocalDateTimeString(end,DateUtil.dateFormatter),3L, TimeUnit.DAYS);
+            redisTemplate.opsForValue().set(PRE_DATE_KEY  ,DateUtil.asLocalDateTimeString(end,DateUtil.dateFormatter),REDIS_KEY_TIMEOUT, TimeUnit.DAYS);
             log.info("num:{},type:{},finish clean up {} days data ,time:{}s" ,type.equals(1)?shop_num.getAndIncrement():mall_num.getAndIncrement(),type,MINUS_DATE,(System.currentTimeMillis()-begin)*1.0/1000 );
         }
 
