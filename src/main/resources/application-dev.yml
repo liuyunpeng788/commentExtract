@@ -19,14 +19,14 @@ logging:
 spring:
   application:
     # 应用名称
-    name: joycity-blm-serv-comment-tag
+    name: joycity-comment-tag
   http:
     encoding:
       charset: UTF-8
       enabled: true
   # 数据源配置
   datasource:
-      url: jdbc:mysql://172.16.17.115:3306/blm_serv?useUnicode=true&characterEncoding=utf-8&useSSL=false&useTimezone=true&serverTimezone=GMT%2B8
+      url: jdbc:mysql://127.0.0.1:3306/blm_serv?useUnicode=true&characterEncoding=utf-8&useSSL=false&useTimezone=true&serverTimezone=GMT%2B8
       #  &allowPublicKeyRetrieval=true
       username: blm_serv_user
       password: blm_serv_pwd
@@ -51,11 +51,11 @@ spring:
   #redis配置
   redis:
     database: 7
-#    host: 172.17.18.70
+    host: 127.0.0.1
     port: 6379
     password: fonova123
 #开发
-    host: 172.16.17.120
+#    host: 172.16.17.120
 
      # 连接池最大连接数（使用负值表示没有限制） 默认 8
 
@@ -79,13 +79,13 @@ spring:
         enabled: false
 
     mongodb:
-      host: 172.17.18.70
+      host: 127.0.0.1
       port: 27017
       username: blm_serv
       password: blm_serv
       database: blm_serv
 #      开发
-#      host: 172.16.17.121
+#      host: 127.0.0.1
 #      port: 27000
 
 
@@ -104,7 +104,7 @@ core:
 
 # 百度api 接口调用配置
 baidu_api:
-  sleep: 500
+  sleep: 210
   appid: 16832882
   key: sFvE4PQ1O4IhWp0QwD9yoHt8
   secret: IFoLvAT6zmE3dut6CA5Yb3slZDElSgyS
@@ -121,3 +121,8 @@ CONNECTION_VALIDATE_AFTER_INACTIVITY_MS : 20000
 CONNECT_TIMEOUT: 6000
 READ_TIMEOUT: 60000
 CONNECT_REQUSET_TIMEOUT: 60000
+
+
+#告警设置相关
+alert_threshold = 10
+alert_url = https://oapi:dingtalk:com/robot/send?access_token=c966629e8c9c9cb42b3bf0017b4398296969fb6ec2d680b1101ff2337756c54f:

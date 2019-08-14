@@ -1,6 +1,7 @@
 package com.fosun.data.cleanup.comment.tag;
 
 import com.fosun.data.cleanup.comment.tag.dto.po.mongodb.MallCommentInfoPo;
+import com.fosun.data.cleanup.comment.tag.service.impl.BaiduApiServiceImpl;
 import com.mongodb.client.result.UpdateResult;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -30,6 +31,15 @@ public class CommentTagApplicationTests {
 		Query query = new Query(new Criteria().and("_id").is(id));
 		UpdateResult updateResult = mongoTemplate.updateMulti(query, update, MallCommentInfoPo.class);
 		System.out.println(updateResult.getModifiedCount());
+	}
+
+	@Autowired
+	private BaiduApiServiceImpl baiduApiService;
+	@Test
+	public void testGetToken(){
+		String token = baiduApiService.getAccessKey("sFvE4PQ1O4IhWp0QwD9yoHt8","IFoLvAT6zmE3dut6CA5Yb3slZDElSgyS");
+		System.out.println(token);
+
 	}
 
 }

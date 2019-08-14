@@ -39,6 +39,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -66,8 +67,6 @@ public class BaiduApiServiceImpl {
     private final Pattern pattern = Pattern.compile("<span>(.*?)</span>");
     private static final String rm_pattern = "[^\\u0000-\\uFFFF|[\\ud83c\\udc00-\\ud83c\\udfff]|[\\ud83d\\udc00-\\ud83d\\udfff]|[\\u2600-\\u27ff]]";
 
-//    private static final int  COMMENT_SIZE = 900;
-
     /**
      * api调用失败的计数
      */
@@ -83,10 +82,12 @@ public class BaiduApiServiceImpl {
 
     @Value("${baidu_api.secret}")
     private String secret;
-    final AipNlp client = new AipNlp(appid, key, secret);
+
+    @Value("${baidu_api.sleep}")
+    private Integer sleep;
 
 
-     @Autowired
+    @Autowired
     private MongoTemplate mongoTemplate;
     @Autowired
     private CommentTagPoRepository commentTagPoRepository;
@@ -103,6 +104,8 @@ public class BaiduApiServiceImpl {
 
     @Value("${URL_SHOP}")
     private String URL_SHOP;
+    @Autowired
+    private DingDingAlertServiceImpl alertService;
 
 
     /**
@@ -142,25 +145,22 @@ public class BaiduApiServiceImpl {
 
         int res = 0;
         log.info("所有提取的标签，按照百度的标签分类");
-        /**
-         * 执行该语句容易导致gc overhead limit 的问题
-         * 解决方法：每次只是添加
-//        List<MongoCommentTagInfoPo> mongoCommentTagInfoPos = mongoTemplate.find(new Query(), MongoCommentTagInfoPo.class);
-         */
         List<MongoCommentTagInfoPo> pos = new ArrayList<>(3000);
         //提取标签
         if( !CollectionUtils.isEmpty(mallCommentInfoPos)){
             log.info("获取到{}条商场的评论数据，start:{},end:{}",mallCommentInfoPos.size(),startDate,endDate);
-//            pos = getMongoTagData(mongoCommentTagInfoPos, SubjectTypeEnum.MALL);
-            dealMallCommentInfo(mallCommentInfoPos, pos);
-            res += mallCommentInfoPos.size();
+            try{
+                dealMallCommentInfo(mallCommentInfoPos, pos);
+                res += mallCommentInfoPos.size();
+            }catch (Exception e){
+                log.error("wrong..." + e.getMessage());
+            }
         }else{
             log.info("没有获取到商场的评论数据，start:{},end:{}",startDate,endDate);
         }
         if( !CollectionUtils.isEmpty(shopCommentInfoPos) ){
              log.info("获取到{}条店铺的评论数据，start:{},end:{}",shopCommentInfoPos.size(),startDate,endDate);
-//             pos = getMongoTagData(mongoCommentTagInfoPos,SubjectTypeEnum.SHOP);
-             dealShopCommentInfo(shopCommentInfoPos,pos);
+              dealShopCommentInfo(shopCommentInfoPos,pos);
              res += shopCommentInfoPos.size();
         }else{
             log.info("没有获取到店铺的评论数据，start:{},end:{}",startDate,endDate);
@@ -194,24 +194,37 @@ public class BaiduApiServiceImpl {
      * @param pos 处理后的标签信息
      */
 
-    private void updateMongodbTagInfo(final List<MongoCommentTagInfoPo> pos ) {
+    private  void updateMongodbTagInfo(final List<MongoCommentTagInfoPo> pos ) {
         long start = System.currentTimeMillis();
         int cnt = 0;
         try{
             log.info("开始更新mongodb数据");
+
             if(!CollectionUtils.isEmpty(pos)){
-                Criteria criteria;
-                MongoCommentTagInfoPo mongoCommentTagInfoPo;
-                for(MongoCommentTagInfoPo po : pos){
-                    criteria = new Criteria();
-                    criteria.and("bizType").is(po.getBizType());
-                    criteria.and("source").is(po.getSource());
-                    mongoCommentTagInfoPo = mongoTemplate.findOne(new Query(criteria), MongoCommentTagInfoPo.class);
-                    if(mongoCommentTagInfoPo == null){
-                        mongoTemplate.save(po);
+                Map<String, List<MongoCommentTagInfoPo>> collect = pos.stream().collect(Collectors.groupingBy(x -> x.getBizType() + "_" + x.getSource()));
+                for(Map.Entry<String, List<MongoCommentTagInfoPo>> entry: collect.entrySet()){
+                    List<MongoCommentTagInfoPo> value = entry.getValue();
+                    Criteria criteria = new Criteria();
+                    Set<String> items = new HashSet<>(100);
+                    value.stream().forEach(x->{
+                        if(null != x && !CollectionUtils.isEmpty(x.getTag())){
+                            items.addAll(x.getTag());
+                        }
+                    });
+                    MongoCommentTagInfoPo tmp = value.get(0);
+                    criteria.and("bizType").is(tmp.getBizType());
+                    criteria.and("source").is(tmp.getSource());
+                    MongoCommentTagInfoPo po = mongoTemplate.findOne(new Query(criteria), MongoCommentTagInfoPo.class);
+                    Date updateTime = new Date();
+                    if(po == null){
+                        tmp.setTag(items);
+                        tmp.setCreateTime(updateTime);
+                        tmp.setUpdateTime(updateTime);
+                        mongoTemplate.save(tmp);
                     }else{
-                        mongoCommentTagInfoPo.getTag().addAll(po.getTag());
-                        mongoTemplate.save(mongoCommentTagInfoPo);
+                        po.getTag().addAll(items);
+                        po.setUpdateTime(updateTime);
+                        mongoTemplate.save(po);
                     }
                     cnt++;
                 }
@@ -219,10 +232,10 @@ public class BaiduApiServiceImpl {
             }else{
                 log.info("待插入mongodb标签的标签列表为空");
             }
-
         }catch (Exception e){
             log.error("写入mongodb标签失败，异常信息:" + e.getLocalizedMessage());
         }finally {
+
             long end = System.currentTimeMillis();
             log.info("写入mongodb 标签结束,一共写入{}条标签,耗时：{}s",cnt,1.0*(end-start)/1000);
         }
@@ -248,22 +261,25 @@ public class BaiduApiServiceImpl {
             //查找大众的业态对应的百度业态id
             ESimnetType eSimnetType = queryBaiduBizClsByShopId(id);
             List<ShopCommentInfoPo> failCommentInfo = new ArrayList<>(data.size());
-            data.parallelStream().forEach(x->{
-                Tuple<List<String>, String>  contentTuple = requestLTPParse(x.getId(),x.getContent(),eSimnetType,false);
-//                 Tuple<List<String>, String>  contentTuple = requestTagParse(x.getId(),x.getContent(),eSimnetType);
-                if(!CollectionUtils.isEmpty(contentTuple.t1)){
-                    //成功提取了文章的观点信息，则需要保存评论信息和店铺的观点信息
-                    x.setHighlightContent(contentTuple.t2);
-                    x.setCommentTag(contentTuple.t1);
-                    contentTuple.t1.stream().forEach(tag ->{
-                        cntMap.putIfAbsent(tag,0);
-                        cntMap.computeIfPresent(tag,(k,v)->v+1);
-                        saveTags(pos,DEF_BAIDU_BIZ,tag,SubjectTypeEnum.SHOP.getValue().intValue());
-                    });
-                    updateDocument(x.getId(),contentTuple.t2,contentTuple.t1,1);
-                }else{
+            data.stream().forEach(x->{
+                try {
+                    Tuple<List<String>, String>  contentTuple = requestTagParse(x.getId(),x.getContent(),eSimnetType);
+                    if(!CollectionUtils.isEmpty(contentTuple.t1)){
+                        //成功提取了文章的观点信息，则需要保存评论信息和店铺的观点信息
+                        x.setHighlightContent(contentTuple.t2);
+                        x.setCommentTag(contentTuple.t1);
+                        contentTuple.t1.stream().forEach(tag ->{
+                            cntMap.putIfAbsent(tag,0);
+                            cntMap.computeIfPresent(tag,(k,v)->v+1);
+                            saveTags(pos,DEF_BAIDU_BIZ,tag,SubjectTypeEnum.SHOP.getValue().intValue());
+                        });
+                        updateDocument(x.getId(),contentTuple.t2,contentTuple.t1,1);
+                    }
+                } catch (Exception e) {
                     // 保存处理失败的信息
+                    x.setCreateTime(new Date());
                     failCommentInfo.add(x);
+                    log.error("处理店铺信息发生异常。异常详情：" + e.getMessage());
                 }
             });
              long e1 = System.currentTimeMillis();
@@ -279,6 +295,8 @@ public class BaiduApiServiceImpl {
         log.info("：{}, 耗时：{}s",shopCommentInfoPos.size(),1.0*(end-start)/1000);
 
     }
+
+
 
     /**
      * 根据店铺业态，查询对应的百度业态类型
@@ -321,22 +339,23 @@ public class BaiduApiServiceImpl {
 
             //处理失败的商场信息
             List<MallCommentInfoPo> failCommentInfo = new ArrayList<>(data.size());
-            data.parallelStream().forEach(x->{
-                Tuple<List<String>, String>  contentTuple = requestLTPParse(x.getId(),x.getContent(),ESimnetType.SHOPPING,true);
-//                Tuple<List<String>, String> contentTuple = requestTagParse(x.getId(),x.getContent(),ESimnetType.SHOPPING);
-                if(!CollectionUtils.isEmpty(contentTuple.t1)){
-                    //成功提取了文章的观点信息，则需要保存评论信息和商场的观点信息
-                    contentTuple.t1.stream().forEach(tag ->{
-                        cntMap.putIfAbsent(tag,0);
-                        cntMap.computeIfPresent(tag,(k,v)->v+1);
-                        saveTags(pos,DEF_BAIDU_BIZ,tag,SubjectTypeEnum.MALL.getValue().intValue());
-                    });
-                    updateDocument(x.getId(),contentTuple.t2,contentTuple.t1,0);
-                }else{
-                    //保存处理失败的信息
+            data.stream().forEach(x->{
+                try {
+                    Tuple<List<String>, String> contentTuple = requestTagParse(x.getId(),x.getContent(),ESimnetType.SHOPPING);
+                    if(!CollectionUtils.isEmpty(contentTuple.t1)){
+                        //成功提取了文章的观点信息，则需要保存评论信息和商场的观点信息
+                        contentTuple.t1.stream().forEach(tag ->{
+                            cntMap.putIfAbsent(tag,0);
+                            cntMap.computeIfPresent(tag,(k,v)->v+1);
+                            saveTags(pos,DEF_BAIDU_BIZ,tag,SubjectTypeEnum.MALL.getValue().intValue());
+                        });
+                        updateDocument(x.getId(),contentTuple.t2,contentTuple.t1,0);
+                    }
+                } catch (Exception e) {
+                    log.error("处理商场数据出现异常，异常信息：" + e.getMessage());
                     failCommentInfo.add(x);
                 }
-             });
+            });
 
             long e1 = System.currentTimeMillis();
             log.info("处理商场id{},评论类型：{}，数据量：{}, 耗时：{}s",id,commentType,data.size(),1.0*(e1-s1)/1000);
@@ -360,13 +379,19 @@ public class BaiduApiServiceImpl {
      * @return 更新的文档数
      */
     private long updateDocument(String id, String highLightContent,List<String> tags,int type){
-        Update update = new Update();
-        update.set("commentTag",tags);
-        update.set("highlighContent",highLightContent);
-        Query query = new Query(new Criteria().and("_id").is(id));
-        UpdateResult updateResult = mongoTemplate.updateMulti(query, update, type==0?MallCommentInfoPo.class:ShopCommentInfoPo.class);
-        log.info("更新文档：{}成功",id);
-        return updateResult.getModifiedCount();
+        try{
+             log.info("update document now....");
+            Update update = new Update();
+            update.set("commentTag",tags);
+            update.set("highlighContent",highLightContent);
+            Query query = new Query(new Criteria().and("_id").is(id));
+            UpdateResult updateResult = mongoTemplate.updateMulti(query, update, type==0?MallCommentInfoPo.class:ShopCommentInfoPo.class);
+            log.info("更新文档：{}成功",id);
+            return updateResult.getModifiedCount();
+        }catch (Exception e){
+            log.error("update oocument error. msg:" + e.getMessage());
+        }
+        return 0;
 
     }
     /**
@@ -442,6 +467,7 @@ public class BaiduApiServiceImpl {
      * @return 更新的评论数
      */
     private int updateCommentTags(final List<CommentTagPo> commentTagPos ){
+        log.info("update comment tags now....");
         if(!CollectionUtils.isEmpty(commentTagPos)){
             //删除该商场的所有评论标签信息
             CommentTagPo po = commentTagPos.get(0);
@@ -457,39 +483,43 @@ public class BaiduApiServiceImpl {
 
     /**
      * 本地ltp-serv 接口，获取标签信息
+     * 产品反馈效果不好，很多评论无法提取出来，因此不用该方法
      * @param content 待解析的评论内容
      * @param eSimnetType 百度业态类型
      * @return tuple 对象 ，属性1：标签集合 属性2： 包含高亮信息评论详情
      */
-
+    @Deprecated
     private Tuple<List<String>,String> requestLTPParse(String id,String content,ESimnetType eSimnetType,boolean isMall){
-        List<String> tags = new ArrayList<>();
-        long t1=System.currentTimeMillis();
-//        Pattern emoji = Pattern.compile ("[\ud83c\udc00-\ud83c\udfff]|[\ud83d\udc00-\ud83d\udfff]|[\u2600-\u27ff]",Pattern.UNICODE_CASE | Pattern.CASE_INSENSITIVE ) ;
-        JSONArray arr = requestLTPServer(content,isMall);
-       log.info(String.format("request cost %f s",(System.currentTimeMillis()-t1)*1.0/1000));
-        if(!CollectionUtils.isEmpty(arr)){
-            //一个段落里的每句话，按照句号、问好、感叹号等分隔
-            arr.parallelStream().forEach(x->{
-                JSONArray subSentenceArr = (JSONArray) x;
-                //一个句子中的每个短句
-                for (int k = 0; k < subSentenceArr.size(); k++) {
-                    com.alibaba.fastjson.JSONObject pos = subSentenceArr.getJSONObject(k);
-                    k = pos.getInteger("id");
-                    //提取名词,线程安全
-                    StringBuilder sb = new StringBuilder();
-                    //类似“管理混乱”这种，对于管理一词，是SBV结构，且他的parentId 为混乱，但是混乱是形容词，应该被提取出来
-                    if(pos.getString("pos").equalsIgnoreCase("n")
-                            ||(pos.getString("pos").equalsIgnoreCase("v") && pos.getString("relate").equalsIgnoreCase("SBV"))){
-                        com.alibaba.fastjson.JSONObject pObject = subSentenceArr.getJSONObject(pos.getInteger("parent"));
-                        if(pObject.getString("pos").equalsIgnoreCase("a")  ){
-                            sb.append(pos.getString("cont")).append(pObject.getString("cont"));
-                            k = Math.max(k,pObject.getInteger("id"));
-                            if(sb.length()>2){
-                                tags.add(sb.toString());
-                            }
+        try{
 
-                        }
+            List<String> tags = new ArrayList<>();
+            long t1=System.currentTimeMillis();
+//        Pattern emoji = Pattern.compile ("[\ud83c\udc00-\ud83c\udfff]|[\ud83d\udc00-\ud83d\udfff]|[\u2600-\u27ff]",Pattern.UNICODE_CASE | Pattern.CASE_INSENSITIVE ) ;
+            JSONArray arr = requestLTPServer(content,isMall);
+            Thread.sleep(600);
+            log.info(String.format("request cost %f s",(System.currentTimeMillis()-t1)*1.0/1000));
+            if(!CollectionUtils.isEmpty(arr)){
+                //一个段落里的每句话，按照句号、问好、感叹号等分隔
+                arr.stream().forEach(x->{
+                    JSONArray subSentenceArr = (JSONArray) x;
+                    //一个句子中的每个短句
+                    for (int k = 0; k < subSentenceArr.size(); k++) {
+                        com.alibaba.fastjson.JSONObject pos = subSentenceArr.getJSONObject(k);
+                        k = pos.getInteger("id");
+                        //提取名词,线程安全
+                        StringBuilder sb = new StringBuilder();
+                        //类似“管理混乱”这种，对于管理一词，是SBV结构，且他的parentId 为混乱，但是混乱是形容词，应该被提取出来
+                        if(pos.getString("pos").equalsIgnoreCase("n")
+                                ||(pos.getString("pos").equalsIgnoreCase("v") && pos.getString("relate").equalsIgnoreCase("SBV"))){
+                            com.alibaba.fastjson.JSONObject pObject = subSentenceArr.getJSONObject(pos.getInteger("parent"));
+                            if(pObject.getString("pos").equalsIgnoreCase("a")  ){
+                                sb.append(pos.getString("cont")).append(pObject.getString("cont"));
+                                k = Math.max(k,pObject.getInteger("id"));
+                                if(sb.length()>2){
+                                    tags.add(sb.toString());
+                                }
+
+                            }
 //                        else if(pObject.getString("relate").equalsIgnoreCase("SBV")){
 //                             这种结构不适合
 //                            sb.append(pos.getString("cont")).append(pObject.getString("cont"));
@@ -499,17 +529,21 @@ public class BaiduApiServiceImpl {
 //                            k = Math.max(k,pObject.getInteger("id"));
 //                            tags.add(sb.toString());
 //                        }
+                        }
                     }
-                }
-            });
-        }else{
-            log.warn("评论id:{}本地ltp接口调用失败",id);
-            failureCount.getAndIncrement();
-            return new Tuple(new ArrayList<>(0),content);
+                });
+            }else{
+                log.warn("评论id:{}本地ltp接口调用失败",id);
+                failureCount.getAndIncrement();
+                return new Tuple(new ArrayList<>(0),content);
+            }
+            long t2 = System.currentTimeMillis();
+            log.info("评论id:{}解析成功, cost:{} ",id, (t2 - t1)*0.1/1000 + " s");
+            return new Tuple<>(tags,content);
+        }catch (Exception e){
+            log.error("parse error:" + e.getMessage());
         }
-        long t2 = System.currentTimeMillis();
-        log.info("评论id:{}解析成功, cost:{} ",id, (t2 - t1)*0.1/1000 + " s");
-        return new Tuple<>(tags,content);
+        return new Tuple(new ArrayList<>(0),content);
     }
 
     /**
@@ -519,6 +553,7 @@ public class BaiduApiServiceImpl {
      * @param isMall 是否是商场
      * @return 句子解析的结果
      */
+    @Deprecated
     private JSONArray requestLTPServer(String content,boolean isMall){
         content = content.replaceAll(rm_pattern,"");
 
@@ -546,55 +581,125 @@ public class BaiduApiServiceImpl {
     }
 
     /**
+     *
+     * 通过url的方式获取百度的解析结果
+     * @param content 待解析内容
+     * @return 解析的结果
+     */
+    private JSONObject getAPIData(String content , ESimnetType eSimnetType){
+        log.info("enter getAPIData.....");
+        //获取key
+        String token = getAccessKey(key,secret);
+        String url = "https://aip.baidubce.com/rpc/2.0/nlp/v2/comment_tag?charset=UTF-8&access_token=" + token;
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("content-type","application/json");
+        if(StringUtils.isNotBlank(content)){
+            MultiValueMap<String, Object> requestEntity;
+            if(StringUtils.isNotBlank(content)){
+                requestEntity = new LinkedMultiValueMap<>();
+                requestEntity.add("text",content);
+                requestEntity.add("type",eSimnetType.ordinal());
+                HttpEntity<MultiValueMap<String, Object>> httpEntity = new HttpEntity<>(requestEntity,headers);
+                ResponseEntity<JSONObject> response ;
+                for(int i = 0;i<3;i++){
+                    try {
+                        response = restTemplate.postForEntity( url ,httpEntity, JSONObject.class);
+                        Thread.sleep(sleep);
+                        if(response.getStatusCode().equals(HttpStatus.OK)){
+                            log.info("调用百度api请求成功。res: " + response.toString());
+                            return response.getBody();
+                        }
+                    } catch (Exception e) {
+                        log.error("调用api请求发生异常....，异常信息：" + e.getMessage());
+                    }
+                }
+            }
+        }
+
+        return new JSONObject();
+    }
+
+    /**
+     * 获取访问token
+     * @param key 访问id
+     * @param secret 访问密钥
+     * @return token信息
+     */
+    public String getAccessKey(String key , String secret){
+         String url= String.format("https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=%s&client_secret=%s", key,secret);
+        String res = null;
+        JSONObject obj;
+        for(int i =0 ;i<3;i++){
+             res = restTemplate.getForObject(url,String.class);
+             if(StringUtils.isNotBlank(res)){
+                  obj = JSONObject.parseObject(res);
+                  res = obj.getString("access_token");
+                  if(StringUtils.isNotBlank(res)){
+                      return res;
+                  }
+             }
+         }
+        return res;
+    }
+
+    /**
+     * 通过百度api client的方式，获取解析结果
+     * @param content 内容
+     * @param eSimnetType 类型
+     * @return 解析结果
+     */
+    @Deprecated
+    private JSONObject getBaiduParseByClient(String content , ESimnetType eSimnetType){
+         if(StringUtils.isNotBlank(content)){
+             log.info("enter getBaiduParseByClient.....");
+             AipNlp client = new AipNlp(appid, key, secret);
+             // 重试3次
+             try {
+                 log.info("开始请求api.....");
+                 for(int i = 0;i<3;i++){
+                     org.json.JSONObject response = client.commentTag(content, eSimnetType, null);
+                     Thread.sleep(sleep);
+                     if(null != response.get("items")) {
+                         return (JSONObject) JSONObject.parse(response.toString());
+                     }
+               }
+             } catch (Exception e) {
+                 log.error("获取百度解析结果异常。内容：" + content + ",\r\n 异常信息：" + e.getMessage());
+             }
+             client = null;
+         }
+
+        return new JSONObject();
+    }
+    /**
      * 请求百度api 接口，获取标签信息
      *  qps 无法达到5，所以暂时不用该方法
      * @param content 待解析的评论内容
      * @param eSimnetType 百度业态类型
      * @return tuple 对象 ，属性1：标签集合 属性2： 包含高亮信息评论详情
      */
-    @Deprecated
     private Tuple<List<String>, String> requestTagParse(String id,String content,ESimnetType eSimnetType)  {
 
         //移除掉所有的表情符号
         content = content.replaceAll(rm_pattern,"");
         // 获取美食评论情感属性
-        HashMap<String,Object> options = new HashMap<>(2);
-        org.json.JSONObject res = null;
+        JSONObject res = null;
         log.info("开始调用百度api评论：{}",id);
-        for( int i = 1; i<4;i++){
-            if(redisUtil.existReqLock()){
-                log.info("存在百度api锁，等待释放");
-                redisUtil.waitReqUnlock();
-            }
-            log.info("获得百度api锁");
-            //建立连接超时的时间
-            client.setConnectionTimeoutInMillis(30000);
-            //数据传输超时时间
-            client.setSocketTimeoutInMillis(30000);
-            res = client.commentTag(content,eSimnetType ,options);
-//            try{
-//                Thread.sleep(400);
-//            }catch (InterruptedException e){
-//                log.error(e.getLocalizedMessage());
-//            }
-            redisUtil.setReqLock();
-            if(!res.has("error_msg")){
-                //没有报错
-                break;
-            }
-            log.info("调用百度api失败,重试次数:{},res:{}",i,res.toString());
-        }
+        res = getAPIData(content,eSimnetType);
         List<String> tags = new ArrayList<>();
-        if(!res.has("items")){
+        if(null == res.get("items")){
+            //发送钉钉告警
+            alertService.checkAndSendAlert(false);
             log.warn("评论id:{}百度api调用失败",id);
             failureCount.getAndIncrement();
             return new Tuple(new ArrayList<>(0),content);
         }
+        alertService.checkAndSendAlert(true);
         log.info("调用百度api成功");
-        org.json.JSONArray arr = res.getJSONArray("items");
-        org.json.JSONObject obj;
+        JSONArray arr = res.getJSONArray("items");
+        JSONObject obj;
         Matcher matcher;
-        for(int i = 0; i< arr.length();i++) {
+        for(int i = 0; i< arr.size();i++) {
             obj = arr.getJSONObject(i);
             String tag = Strings.EMPTY;
             if (StringUtils.isNotBlank(obj.getString("prop"))) {
@@ -623,7 +728,7 @@ public class BaiduApiServiceImpl {
                         try {
                             content = content.replaceAll(matchWord, "<pre>" + matchWord + "</pre>");
                         } catch (Exception e) {
-                            System.out.println("parse error: " + content);
+                           log.error("parse error: " + content);
                         }
                     }
                 }

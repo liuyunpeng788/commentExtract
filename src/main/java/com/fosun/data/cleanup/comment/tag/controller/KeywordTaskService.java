@@ -63,7 +63,7 @@ public class KeywordTaskService implements Runnable {
 
 
     /**
-     * 连续多少次没有数据。因为每次跑30天的数据，所以，如果连续3个月没有数据，
+     * 连续多少次没有数据。因为每次跑(@link MINUS_DATE) 天的数据，所以，如果连续3*MINUS_DATE 天没有数据，
      * 则可以说明已经没历史数据需要跑了。如果redis 中的阀值操作了Integer.max,则不再增加。
      * 否则，没有数据，则 EMPTY_TIMES 对应的值加1
      */
@@ -140,7 +140,6 @@ public class KeywordTaskService implements Runnable {
             }
             end = start;
             localDateTime = LocalDateTime.now();
-
             redisTemplate.opsForValue().set(PRE_DATE_KEY  ,DateUtil.asLocalDateTimeString(end,DateUtil.dateFormatter),3L, TimeUnit.DAYS);
             log.info("num:{},type:{},finish clean up {} days data ,time:{}s" ,type.equals(1)?shop_num.getAndIncrement():mall_num.getAndIncrement(),type,MINUS_DATE,(System.currentTimeMillis()-begin)*1.0/1000 );
         }

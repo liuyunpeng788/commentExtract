@@ -6,6 +6,7 @@ import lombok.Setter;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.io.Serializable;
+import java.util.Date;
 import java.util.Set;
 
 /**
@@ -31,4 +32,14 @@ public class MongoCommentTagInfoPo implements Serializable {
      * 标签来源 0：商场 1：店铺
      */
     private Integer source;
+
+    /**
+     * 创建时间
+     */
+    private Date createTime;
+
+    /**
+     * 更新时间
+     */
+    private Date updateTime;
 }
